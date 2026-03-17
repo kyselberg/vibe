@@ -8,7 +8,7 @@ Private desktop-first music lounge built with Nuxt 4, NuxtHub and the Cloudflare
 - Track upload flow with client-side metadata extraction
 - Direct-to-R2 signed upload/download path when R2 credentials are configured
 - Local storage proxy fallback for development via NuxtHub Blob
-- D1/libSQL-backed metadata for tracks, playlists, settings, queue snapshots and upload jobs
+- PostgreSQL-backed metadata for tracks, playlists, settings, queue snapshots and upload jobs
 - HTML audio player with queue, repeat, shuffle, volume and Media Session API support
 - Animated shader backgrounds plus built-in muted MP4 loop scenes
 - PWA manifest and installable desktop experience
@@ -17,7 +17,7 @@ Private desktop-first music lounge built with Nuxt 4, NuxtHub and the Cloudflare
 
 - `nuxt@4`
 - `@nuxthub/core`
-- Cloudflare `D1` via NuxtHub database
+- Neon/PostgreSQL via NuxtHub database
 - Cloudflare `R2` via NuxtHub blob and optional S3 presigned URLs
 - `Pinia` for app state
 - `music-metadata-browser` for client-side ID3/basic metadata
@@ -59,19 +59,32 @@ pnpm db:migrate
 
 ## Cloudflare setup
 
-1. Create an R2 bucket and a D1 database.
-2. Update [wrangler.jsonc](/Users/illia/workspaces/vibe.youwillmiss.dev/wrangler.jsonc) with the real bucket name and D1 database ID.
-3. Set production secrets for:
+Production deploys run through GitHub Actions and publish the Worker on `https://vibe.youwillmiss.dev`.
+
+1. Make sure the `youwillmiss.dev` zone stays on Cloudflare DNS.
+2. Create an R2 bucket for media storage.
+3. Create a GitHub Actions `production` environment and set these required secrets:
+   - `CLOUDFLARE_API_TOKEN`
    - `NUXT_APP_PASSCODE`
    - `NUXT_SESSION_SECRET`
    - `CLOUDFLARE_ACCOUNT_ID`
+   - `DATABASE_URL`
    - `R2_ACCESS_KEY_ID`
    - `R2_SECRET_ACCESS_KEY`
    - `R2_BUCKET`
+4. Optionally set these production secrets when you need non-default R2 settings:
    - `R2_ENDPOINT`
-4. Build and deploy:
+   - `R2_REGION`
+5. Push to `main` or manually run the `Deploy Cloudflare Production` workflow.
+
+The deploy workflow runs `pnpm test`, `pnpm typecheck`, `pnpm db:migrate`, `pnpm build:cloudflare`, and then deploys with Wrangler from the repo root. Schema changes are applied by the explicit CI migration step, not by `nuxt build`.
+
+## Manual production deploy
+
+If you need to deploy outside GitHub Actions, run the migration explicitly before deploying:
 
 ```bash
+DATABASE_URL=... pnpm db:migrate
 pnpm build:cloudflare
 pnpm deploy
 ```

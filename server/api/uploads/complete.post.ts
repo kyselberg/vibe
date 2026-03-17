@@ -1,6 +1,5 @@
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
-import { blob } from '@nuxthub/blob'
 import { db } from '@nuxthub/db'
 import { uploadJobs } from '~~/server/db/schema'
 import { requireAppSession } from '~~/server/utils/auth'
@@ -23,21 +22,11 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  if (job.status === 'pending') {
-    const object = await blob.head(job.objectKey)
-    if (!object) {
-      throw createError({
-        statusCode: 409,
-        statusMessage: 'Upload is not visible in storage yet'
-      })
-    }
-  }
-
   await db.update(uploadJobs)
     .set({
       status: 'uploaded',
       metadataJson: JSON.stringify(payload.metadata),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date()
     })
     .where(eq(uploadJobs.id, job.id))
 

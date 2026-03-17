@@ -72,6 +72,7 @@ watch(audioRef, syncAudioElement)
   <section class="panel player-panel">
     <audio
       ref="audioRef"
+      crossorigin="anonymous"
       preload="metadata"
       @play="vibe.isPlaying = true"
       @pause="vibe.isPlaying = false"

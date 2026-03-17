@@ -1,11 +1,11 @@
 import { asc, desc, eq } from 'drizzle-orm'
 import { createError } from 'h3'
-import { blob } from '@nuxthub/blob'
 import { db } from '@nuxthub/db'
 import type { BackgroundScene, LibraryBootstrap, PlaybackUrl, Playlist, QueueSnapshot, Track, UserSettings } from '~~/shared/types/vibe'
 import { defaultBackgroundScenes } from '~~/shared/backgrounds/catalog'
+import { getMissingBackgroundScenes, normalizeBackgroundScene, sortBackgroundScenes } from '~~/shared/backgrounds/registry'
 import { backgroundScenes, playlists, queueSnapshots, tracks, uploadJobs, userSettings } from '~~/server/db/schema'
-import { createPresignedDownloadUrl, hasR2SigningConfig, makeProxyPlaybackUrl } from './r2'
+import { createPresignedDownloadUrl, hasR2SigningConfig } from './r2'
 
 const SETTINGS_ID = 'primary'
 const LAST_QUEUE_ID = 'last-session'
@@ -23,7 +23,13 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
 }
 
 function now() {
-  return new Date().toISOString()
+  return new Date()
+}
+
+function toISOString(date: Date | string | null | undefined): string {
+  if (!date) return new Date().toISOString()
+  if (date instanceof Date) return date.toISOString()
+  return date
 }
 
 export function mapTrack(row: typeof tracks.$inferSelect): Track {
@@ -37,7 +43,7 @@ export function mapTrack(row: typeof tracks.$inferSelect): Track {
     objectKey: row.objectKey,
     mimeType: row.mimeType,
     coverKey: row.coverKey,
-    createdAt: row.createdAt
+    createdAt: toISOString(row.createdAt)
   }
 }
 
@@ -46,8 +52,8 @@ export function mapPlaylist(row: typeof playlists.$inferSelect): Playlist {
     id: row.id,
     name: row.name,
     trackIds: parseJson<string[]>(row.trackIds, []),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt
+    createdAt: toISOString(row.createdAt),
+    updatedAt: toISOString(row.updatedAt)
   }
 }
 
@@ -76,10 +82,6 @@ async function resolveScenePlayback(
   const config = useRuntimeConfig()
   const parsedConfig = parseJson<BackgroundScene['config']>(scene.configJson, {})
 
-  if (scene.videoKey && hasR2SigningConfig(config)) {
-    return createPresignedDownloadUrl(config, scene.videoKey)
-  }
-
   if (parsedConfig.localUrl) {
     return {
       url: parsedConfig.localUrl,
@@ -87,11 +89,8 @@ async function resolveScenePlayback(
     }
   }
 
-  if (scene.videoKey) {
-    return {
-      url: makeProxyPlaybackUrl('backgrounds', scene.id),
-      expiresAt: null
-    }
+  if (scene.videoKey && hasR2SigningConfig(config)) {
+    return createPresignedDownloadUrl(config, scene.videoKey)
   }
 
   return {
@@ -102,7 +101,7 @@ async function resolveScenePlayback(
 
 export async function mapBackgroundScene(row: typeof backgroundScenes.$inferSelect): Promise<BackgroundScene> {
   const playback = row.kind === 'video' ? await resolveScenePlayback(row) : null
-  return {
+  return normalizeBackgroundScene({
     id: row.id,
     kind: row.kind as BackgroundScene['kind'],
     name: row.name,
@@ -110,11 +109,14 @@ export async function mapBackgroundScene(row: typeof backgroundScenes.$inferSele
     previewKey: row.previewKey,
     videoKey: row.videoKey,
     playbackUrl: playback?.url || null
-  }
+  })
 }
 
 export async function ensureSeedData() {
-  const existingScenes = await db.select().from(backgroundScenes).limit(1)
+  const existingScenes = await db.select({
+    id: backgroundScenes.id
+  }).from(backgroundScenes)
+
   if (existingScenes.length === 0) {
     await db.insert(backgroundScenes).values(defaultBackgroundScenes.map((scene: BackgroundScene) => ({
       id: scene.id,
@@ -125,6 +127,19 @@ export async function ensureSeedData() {
       videoKey: scene.videoKey ?? null,
       createdAt: now()
     })))
+  } else {
+    const missingScenes = getMissingBackgroundScenes(existingScenes.map(scene => scene.id))
+    if (missingScenes.length) {
+      await db.insert(backgroundScenes).values(missingScenes.map((scene: BackgroundScene) => ({
+        id: scene.id,
+        kind: scene.kind,
+        name: scene.name,
+        configJson: JSON.stringify(scene.config),
+        previewKey: scene.previewKey ?? null,
+        videoKey: scene.videoKey ?? null,
+        createdAt: now()
+      })))
+    }
   }
 
   const settingsRow = await db.select().from(userSettings).where(eq(userSettings.id, SETTINGS_ID)).limit(1)
@@ -166,8 +181,9 @@ export async function getPlaylists() {
 }
 
 export async function getBackgrounds() {
-  const rows = await db.select().from(backgroundScenes).orderBy(asc(backgroundScenes.name))
-  return Promise.all(rows.map(mapBackgroundScene))
+  const rows = await db.select().from(backgroundScenes)
+  const scenes = await Promise.all(rows.map(mapBackgroundScene))
+  return sortBackgroundScenes(scenes)
 }
 
 export async function getSettingsBundle() {
@@ -216,14 +232,11 @@ export async function resolveTrackPlayback(trackId: string): Promise<PlaybackUrl
   }
 
   const config = useRuntimeConfig()
-  if (hasR2SigningConfig(config)) {
-    return createPresignedDownloadUrl(config, track.objectKey)
+  if (!hasR2SigningConfig(config)) {
+    throw createError({ statusCode: 503, statusMessage: 'R2 storage is not configured' })
   }
 
-  return {
-    url: makeProxyPlaybackUrl('tracks', trackId),
-    expiresAt: null
-  }
+  return createPresignedDownloadUrl(config, track.objectKey)
 }
 
 export async function resolveBackgroundPlayback(sceneId: string): Promise<PlaybackUrl> {
@@ -233,18 +246,4 @@ export async function resolveBackgroundPlayback(sceneId: string): Promise<Playba
   }
 
   return resolveScenePlayback(scene)
-}
-
-export async function streamBlobByKey(objectKey: string, fallbackType = 'application/octet-stream') {
-  const blobObject = await blob.get(objectKey)
-  if (!blobObject) {
-    throw createError({ statusCode: 404, statusMessage: 'Media object not found' })
-  }
-
-  return new Response(blobObject.stream(), {
-    headers: {
-      'content-type': blobObject.type || fallbackType,
-      'cache-control': 'private, max-age=300'
-    }
-  })
 }

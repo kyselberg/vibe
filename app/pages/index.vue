@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const auth = useAuthStore()
 const vibe = useVibeStore()
+const ui = useWorkspaceUI()
 
 onMounted(async () => {
   await auth.checkSession()
@@ -22,7 +23,7 @@ watch(() => auth.authenticated, async (authenticated) => {
   <div class="vibe-app">
     <VibeBackgroundStage />
 
-    <main class="vibe-shell">
+    <main class="vibe-shell" :class="{ 'vibe-shell--workspace': auth.authenticated }">
       <section v-if="!auth.ready" class="hero-card hero-card--loading">
         <p class="eyebrow">Booting the lounge</p>
         <h1>Checking your private session.</h1>
@@ -33,11 +34,29 @@ watch(() => auth.authenticated, async (authenticated) => {
 
       <PasscodeGate v-else-if="!auth.authenticated" />
 
-      <div v-else class="workspace-grid">
-        <LibrarySidebar />
-        <PlayerDeck />
-        <BackgroundStudio />
-      </div>
+      <template v-else>
+        <Transition name="sheet-fade">
+          <div
+            v-if="ui.openSurface.value !== 'none'"
+            class="sheet-backdrop"
+            @click="ui.handleBackdropClick"
+          />
+        </Transition>
+
+        <Transition name="sheet-slide">
+          <LibrarySheet v-if="ui.openSurface.value === 'library'" />
+        </Transition>
+
+        <Transition name="sheet-slide">
+          <QueueSheet v-if="ui.openSurface.value === 'queue'" />
+        </Transition>
+
+        <Transition name="sheet-slide">
+          <ScenesSheet v-if="ui.openSurface.value === 'scenes'" />
+        </Transition>
+
+        <NeoDock />
+      </template>
     </main>
   </div>
 </template>

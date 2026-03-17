@@ -39,13 +39,13 @@ export default defineEventHandler(async (event) => {
     objectKey: job.objectKey,
     mimeType: job.mimeType,
     coverKey: payload.coverKey ?? null,
-    createdAt: new Date().toISOString()
+    createdAt: new Date()
   })
 
   await db.update(uploadJobs)
     .set({
       status: 'registered',
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date()
     })
     .where(eq(uploadJobs.id, job.id))
 

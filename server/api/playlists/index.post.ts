@@ -20,8 +20,8 @@ export default defineEventHandler(async (event) => {
     id,
     name: payload.name.trim(),
     trackIds: JSON.stringify(payload.trackIds),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    createdAt: new Date(),
+    updatedAt: new Date()
   })
 
   const [playlist] = await db.select().from(playlists).where(eq(playlists.id, id)).limit(1)

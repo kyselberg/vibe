@@ -20,10 +20,10 @@ export default defineNuxtConfig({
   },
   hub: {
     db: {
-      dialect: 'sqlite',
-      applyMigrationsDuringBuild: false
+      dialect: 'postgresql',
+      applyMigrationsDuringBuild: false,
+      driver: process.env.DATABASE_URL ? 'neon-http' : undefined
     },
-    blob: true,
     dir: '.data'
   },
   nitro: {

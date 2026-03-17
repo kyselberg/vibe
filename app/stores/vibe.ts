@@ -192,6 +192,7 @@ export const useVibeStore = defineStore('vibe', () => {
       return
     }
 
+    element.crossOrigin = 'anonymous'
     element.volume = settings.value.volume
 
     if (currentTrackUrl.value && element.src !== currentTrackUrl.value) {
@@ -224,6 +225,7 @@ export const useVibeStore = defineStore('vibe', () => {
         }
 
         audio.addEventListener('loadedmetadata', finalize, { once: true })
+        audio.crossOrigin = 'anonymous'
         audio.src = url
         audio.load()
       })
@@ -592,6 +594,50 @@ export const useVibeStore = defineStore('vibe', () => {
     await setQueue(playlist.trackIds, 0, true)
   }
 
+  async function deleteTrack(trackId: string) {
+    if (!trackMap.value.has(trackId)) {
+      return
+    }
+
+    try {
+      await $fetch(`/api/tracks/${trackId}`, {
+        method: 'DELETE'
+      })
+
+      tracks.value = tracks.value.filter((track: Track) => track.id !== trackId)
+
+      if (queue.value.includes(trackId)) {
+        const wasCurrentTrack = currentTrackId.value === trackId
+        queue.value = queue.value.filter((id: string) => id !== trackId)
+        
+        if (wasCurrentTrack) {
+          const audio = audioElement.value
+          if (audio) {
+            audio.pause()
+            audio.removeAttribute('src')
+            audio.load()
+          }
+          currentTrackUrl.value = ''
+          currentTrackUrlExpiresAt.value = null
+          isPlaying.value = false
+          
+          syncCurrentTrackWithQueue()
+          
+          if (currentTrackId.value && queue.value.length > 0) {
+            await playTrack(currentTrackId.value, currentIndex.value, true)
+          }
+        } else {
+          syncCurrentTrackWithQueue()
+        }
+        
+        persistPlayerState()
+      }
+    } catch (error) {
+      lastError.value = error instanceof Error ? error.message : 'Failed to delete track'
+      throw error
+    }
+  }
+
   return {
     tracks,
     playlists,
@@ -633,6 +679,7 @@ export const useVibeStore = defineStore('vibe', () => {
     refreshBackgroundPlayback,
     uploadFiles,
     createPlaylist,
-    loadPlaylist
+    loadPlaylist,
+    deleteTrack
   }
 })

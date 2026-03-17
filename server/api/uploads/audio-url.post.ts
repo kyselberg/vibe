@@ -12,13 +12,21 @@ export default defineEventHandler(async (event) => {
   await requireAppSession(event)
   await ensureSeedData()
 
+  const config = useRuntimeConfig(event)
+
+  if (!hasR2SigningConfig(config)) {
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'R2 storage is not configured'
+    })
+  }
+
   const payload = await readValidatedJsonBody(event, z.object({
     filename: z.string().min(1),
     mimeType: z.string().optional().default(''),
     size: z.number().int().positive()
   }))
 
-  const config = useRuntimeConfig(event)
   const maxUploadBytes = (config.public.mediaMaxUploadMb || 250) * 1024 * 1024
   const mimeType = inferAudioMimeType(payload.filename, payload.mimeType)
 
@@ -38,7 +46,7 @@ export default defineEventHandler(async (event) => {
 
   const uploadId = crypto.randomUUID()
   const objectKey = makeObjectKey(payload.filename)
-  const updatedAt = new Date().toISOString()
+  const now = new Date()
 
   await db.insert(uploadJobs).values({
     id: uploadId,
@@ -48,33 +56,18 @@ export default defineEventHandler(async (event) => {
     size: payload.size,
     status: 'pending',
     metadataJson: '{}',
-    createdAt: updatedAt,
-    updatedAt
+    createdAt: now,
+    updatedAt: now
   })
 
-  if (hasR2SigningConfig(config)) {
-    const signed = await createPresignedUploadUrl(config, objectKey, mimeType)
-    const ticket: UploadTicket = {
-      uploadId,
-      objectKey,
-      uploadUrl: signed.url,
-      method: 'PUT',
-      headers: signed.headers,
-      strategy: 'presigned'
-    }
-
-    return ticket
-  }
-
+  const signed = await createPresignedUploadUrl(config, objectKey, mimeType)
   const ticket: UploadTicket = {
     uploadId,
     objectKey,
-    uploadUrl: `/api/uploads/direct/${uploadId}`,
+    uploadUrl: signed.url,
     method: 'PUT',
-    headers: {
-      'content-type': mimeType
-    },
-    strategy: 'proxy'
+    headers: signed.headers,
+    strategy: 'presigned'
   }
 
   return ticket

@@ -29,7 +29,7 @@ export function hasR2SigningConfig(config: ReturnType<typeof useRuntimeConfig>) 
 async function signR2Url(
   config: ReturnType<typeof useRuntimeConfig>,
   objectKey: string,
-  method: 'GET' | 'PUT',
+  method: 'GET' | 'PUT' | 'DELETE',
   expiresInSeconds: number,
   headers: Record<string, string> = {}
 ) {
@@ -84,9 +84,42 @@ export async function createPresignedDownloadUrl(
     throw new Error('R2 signing is not configured')
   }
 
-  return signR2Url(config, objectKey, 'GET', 60 * 60)
+  return signR2Url(config, objectKey, 'GET', 24 * 60 * 60)
 }
 
-export function makeProxyPlaybackUrl(type: 'tracks' | 'backgrounds', id: string) {
-  return `/api/media/${type}/${id}`
+export async function deleteObject(
+  config: ReturnType<typeof useRuntimeConfig>,
+  objectKey: string
+): Promise<void> {
+  if (!hasR2SigningConfig(config)) {
+    throw new Error('R2 signing is not configured')
+  }
+
+  const endpoint = getEndpoint(config)
+  const url = `${endpoint}/${config.r2Bucket}/${encodeObjectKey(objectKey)}`
+
+  const client = new AwsClient({
+    accessKeyId: config.r2AccessKeyId,
+    secretAccessKey: config.r2SecretAccessKey,
+    region: config.r2Region || 'auto',
+    service: 's3'
+  })
+
+  const signed = await client.sign(url, {
+    method: 'DELETE',
+    aws: {
+      service: 's3',
+      region: config.r2Region || 'auto'
+    }
+  })
+
+  const response = await fetch(signed.url, {
+    method: 'DELETE',
+    headers: signed.headers
+  })
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`Failed to delete object: ${response.statusText}`)
+  }
 }
+

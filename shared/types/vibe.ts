@@ -1,5 +1,6 @@
 export type RepeatMode = 'off' | 'one' | 'all'
 export type BackgroundKind = 'shader' | 'video'
+export type BackgroundSceneCategory = 'geometric' | 'organic' | 'signal' | 'video'
 
 export interface Track {
   id: string
@@ -28,6 +29,13 @@ export interface BackgroundSceneConfig {
   intensity?: number
   grain?: number
   glow?: number
+  category?: BackgroundSceneCategory
+  sortOrder?: number
+  speed?: number
+  scale?: number
+  density?: number
+  contrast?: number
+  reactivity?: number
   localUrl?: string
   overlay?: string
 }

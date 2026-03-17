@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
     currentIndex: z.number().int().min(0).default(0)
   }))
 
-  const updatedAt = new Date().toISOString()
+  const updatedAt = new Date()
   await db.update(userSettings)
     .set({
       volume: payload.volume,

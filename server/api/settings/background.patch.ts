@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
   await db.update(userSettings)
     .set({
       activeSceneId: payload.activeSceneId,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date()
     })
     .where(eq(userSettings.id, 'primary'))
 
