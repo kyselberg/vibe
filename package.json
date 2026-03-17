@@ -2,6 +2,7 @@
   "name": "vibe-youwillmiss-dev",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@10.24.0",
   "scripts": {
     "build": "nuxt build",
     "build:cloudflare": "NITRO_PRESET=cloudflare_module nuxt build",
