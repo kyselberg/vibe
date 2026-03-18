@@ -2,11 +2,13 @@
 import type { Track } from '~~/shared/types/vibe'
 
 const vibe = useVibeStore()
-const audioRef = ref<HTMLAudioElement | null>(null)
+const audioRefA = ref<HTMLAudioElement | null>(null)
+const audioRefB = ref<HTMLAudioElement | null>(null)
 const currentTime = ref(0)
 const duration = ref(0)
 
-useAudioVisualiser(audioRef, vibe.setAudioLevel)
+const crossfade = useCrossfade()
+useAudioVisualiser(crossfade.activeAudio, vibe.setAudioLevel, crossfade)
 
 const queueTracks = computed<Track[]>(() => vibe.queueSnapshot.trackIds
   .map((trackId: string) => vibe.tracks.find((track: Track) => track.id === trackId) || null)
@@ -36,42 +38,61 @@ function formatTime(totalSeconds: number) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-function syncAudioElement(audio: HTMLAudioElement | null) {
-  vibe.bindAudio(audio)
-}
-
 function onLoadedMetadata(event: Event) {
   const audio = event.target as HTMLAudioElement
+  if (audio !== crossfade.activeAudio.value) return
   duration.value = audio.duration || 0
 }
 
 function onTimeUpdate(event: Event) {
   const audio = event.target as HTMLAudioElement
+  if (!crossfade.isCrossfading.value) {
+    vibe.checkCrossfade(audio.currentTime, audio.duration)
+  }
+  if (audio !== crossfade.activeAudio.value) return
   currentTime.value = audio.currentTime
   duration.value = audio.duration || duration.value
 }
 
 function onSeek(event: Event) {
   const value = Number((event.target as HTMLInputElement).value)
-  if (!audioRef.value || !Number.isFinite(value)) {
+  const active = crossfade.activeAudio.value
+  if (!active || !Number.isFinite(value)) {
     return
   }
 
-  audioRef.value.currentTime = value
+  active.currentTime = value
   currentTime.value = value
 }
 
 onMounted(() => {
-  syncAudioElement(audioRef.value)
+  if (audioRefA.value && audioRefB.value) {
+    crossfade.bind(audioRefA.value, audioRefB.value)
+    vibe.bindCrossfade(crossfade)
+    vibe.bindAudio(audioRefA.value)
+  }
 })
 
-watch(audioRef, syncAudioElement)
+onUnmounted(() => {
+  crossfade.destroy()
+})
 </script>
 
 <template>
   <section class="panel player-panel">
     <audio
-      ref="audioRef"
+      ref="audioRefA"
+      crossorigin="anonymous"
+      preload="metadata"
+      @play="vibe.isPlaying = true"
+      @pause="vibe.isPlaying = false"
+      @ended="vibe.handleTrackEnded"
+      @error="vibe.handleAudioError"
+      @loadedmetadata="onLoadedMetadata"
+      @timeupdate="onTimeUpdate"
+    />
+    <audio
+      ref="audioRefB"
       crossorigin="anonymous"
       preload="metadata"
       @play="vibe.isPlaying = true"

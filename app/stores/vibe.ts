@@ -1,640 +1,796 @@
-import { parseBlob } from 'music-metadata-browser'
-import type { BackgroundScene, LibraryBootstrap, PlaybackUrl, Playlist, QueueSnapshot, RepeatMode, Track, UploadTicket, UserSettings } from '~~/shared/types/vibe'
+import { parseBlob } from "music-metadata-browser";
+import type { CrossfadeEngine } from "~/composables/useCrossfade";
+import type {
+  BackgroundScene,
+  LibraryBootstrap,
+  PlaybackUrl,
+  Playlist,
+  QueueSnapshot,
+  RepeatMode,
+  Track,
+  UploadTicket,
+  UserSettings,
+} from "~~/shared/types/vibe";
 
 interface UploadStatus {
-  filename: string
-  status: 'queued' | 'uploading' | 'finishing' | 'done' | 'error'
-  message?: string
+  filename: string;
+  status: "queued" | "uploading" | "finishing" | "done" | "error";
+  message?: string;
 }
 
 function defaultSettings(): UserSettings {
   return {
     activeSceneId: null,
     volume: 0.85,
-    repeatMode: 'off',
+    repeatMode: "off",
     shuffle: false,
     lastQueue: [],
-    lastTrackId: null
-  }
+    lastTrackId: null,
+  };
 }
 
 function defaultQueue(): QueueSnapshot {
   return {
     trackIds: [],
     currentIndex: 0,
-    currentTrackId: null
-  }
+    currentTrackId: null,
+  };
 }
 
 function normalizeIndex(index: number, length: number) {
   if (!length) {
-    return 0
+    return 0;
   }
 
-  return Math.min(Math.max(index, 0), length - 1)
+  return Math.min(Math.max(index, 0), length - 1);
 }
 
-export const useVibeStore = defineStore('vibe', () => {
-  const tracks = ref<Track[]>([])
-  const playlists = ref<Playlist[]>([])
-  const backgrounds = ref<BackgroundScene[]>([])
-  const settings = ref<UserSettings>(defaultSettings())
-  const queueSnapshot = ref<QueueSnapshot>(defaultQueue())
-  const currentTrackUrl = ref('')
-  const currentTrackUrlExpiresAt = ref<string | null>(null)
-  const audioElement = shallowRef<HTMLAudioElement | null>(null)
-  const isPlaying = ref(false)
-  const bootstrapping = ref(false)
-  const libraryLoaded = ref(false)
-  const searchQuery = ref('')
-  const audioLevel = ref(0)
-  const uploadStatuses = ref<UploadStatus[]>([])
-  const lastError = ref('')
+export const useVibeStore = defineStore("vibe", () => {
+  const tracks = ref<Track[]>([]);
+  const playlists = ref<Playlist[]>([]);
+  const backgrounds = ref<BackgroundScene[]>([]);
+  const settings = ref<UserSettings>(defaultSettings());
+  const queueSnapshot = ref<QueueSnapshot>(defaultQueue());
+  const currentTrackUrl = ref("");
+  const currentTrackUrlExpiresAt = ref<string | null>(null);
+  const audioElement = shallowRef<HTMLAudioElement | null>(null);
+  let crossfadeEngine: CrossfadeEngine | null = null;
+  const isPlaying = ref(false);
+  const crossfadeTriggered = ref(false);
+  const bootstrapping = ref(false);
+  const libraryLoaded = ref(false);
+  const searchQuery = ref("");
+  const audioLevel = ref(0);
+  const uploadStatuses = ref<UploadStatus[]>([]);
+  const lastError = ref("");
 
-  const trackMap = computed<Map<string, Track>>(() => new Map(tracks.value.map((track: Track) => [track.id, track])))
+  const trackMap = computed<Map<string, Track>>(
+    () => new Map(tracks.value.map((track: Track) => [track.id, track])),
+  );
   const currentTrackId = computed<string | null>({
     get: () => queueSnapshot.value.currentTrackId,
     set: (value: string | null) => {
-      queueSnapshot.value.currentTrackId = value
-    }
-  })
+      queueSnapshot.value.currentTrackId = value;
+    },
+  });
   const queue = computed<string[]>({
     get: () => queueSnapshot.value.trackIds,
     set: (value: string[]) => {
-      queueSnapshot.value.trackIds = value
-    }
-  })
+      queueSnapshot.value.trackIds = value;
+    },
+  });
   const currentIndex = computed<number>({
     get: () => queueSnapshot.value.currentIndex,
     set: (value: number) => {
-      queueSnapshot.value.currentIndex = value
-    }
-  })
+      queueSnapshot.value.currentIndex = value;
+    },
+  });
 
   const currentTrack = computed<Track | null>(() => {
     if (!currentTrackId.value) {
-      return null
+      return null;
     }
 
-    return trackMap.value.get(currentTrackId.value) ?? null
-  })
+    return trackMap.value.get(currentTrackId.value) ?? null;
+  });
 
   const activeScene = computed<BackgroundScene | null>(() => {
     if (settings.value.activeSceneId) {
-      const current = backgrounds.value.find((scene: BackgroundScene) => scene.id === settings.value.activeSceneId)
+      const current = backgrounds.value.find(
+        (scene: BackgroundScene) => scene.id === settings.value.activeSceneId,
+      );
       if (current) {
-        return current
+        return current;
       }
     }
 
-    return backgrounds.value[0] ?? null
-  })
+    return backgrounds.value[0] ?? null;
+  });
 
   const filteredTracks = computed<Track[]>(() => {
-    const query = searchQuery.value.trim().toLowerCase()
+    const query = searchQuery.value.trim().toLowerCase();
     if (!query) {
-      return tracks.value
+      return tracks.value;
     }
 
     return tracks.value.filter((track: Track) => {
-      const haystack = [track.title, track.artist, track.album, track.genre].filter(Boolean).join(' ').toLowerCase()
-      return haystack.includes(query)
-    })
-  })
+      const haystack = [track.title, track.artist, track.album, track.genre]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  });
 
   const persistPlayerState = useDebounceFn(async () => {
     if (!libraryLoaded.value) {
-      return
+      return;
     }
 
     try {
-      await $fetch('/api/settings/player', {
-        method: 'PATCH',
+      await $fetch("/api/settings/player", {
+        method: "PATCH",
         body: {
           volume: settings.value.volume,
           repeatMode: settings.value.repeatMode,
           shuffle: settings.value.shuffle,
           lastQueue: queue.value,
           lastTrackId: currentTrackId.value,
-          currentIndex: currentIndex.value
-        }
-      })
+          currentIndex: currentIndex.value,
+        },
+      });
     } catch {
       // Keep UX optimistic and retry on the next interaction.
     }
-  }, 250)
+  }, 250);
 
   function reset() {
-    tracks.value = []
-    playlists.value = []
-    backgrounds.value = []
-    settings.value = defaultSettings()
-    queueSnapshot.value = defaultQueue()
-    currentTrackUrl.value = ''
-    currentTrackUrlExpiresAt.value = null
-    isPlaying.value = false
-    libraryLoaded.value = false
-    searchQuery.value = ''
-    audioLevel.value = 0
-    uploadStatuses.value = []
-    lastError.value = ''
+    tracks.value = [];
+    playlists.value = [];
+    backgrounds.value = [];
+    settings.value = defaultSettings();
+    queueSnapshot.value = defaultQueue();
+    currentTrackUrl.value = "";
+    currentTrackUrlExpiresAt.value = null;
+    isPlaying.value = false;
+    libraryLoaded.value = false;
+    searchQuery.value = "";
+    audioLevel.value = 0;
+    uploadStatuses.value = [];
+    lastError.value = "";
+    crossfadeTriggered.value = false;
+
+    if (crossfadeEngine) {
+      crossfadeEngine.stop();
+    }
 
     if (audioElement.value) {
-      audioElement.value.pause()
-      audioElement.value.removeAttribute('src')
-      audioElement.value.load()
+      audioElement.value.pause();
+      audioElement.value.removeAttribute("src");
+      audioElement.value.load();
     }
   }
 
   function applyBootstrap(data: LibraryBootstrap) {
-    tracks.value = data.tracks
-    playlists.value = data.playlists
-    backgrounds.value = data.backgrounds
+    tracks.value = data.tracks;
+    playlists.value = data.playlists;
+    backgrounds.value = data.backgrounds;
     settings.value = {
       ...defaultSettings(),
-      ...data.settings
-    }
+      ...data.settings,
+    };
 
-    const initialQueue = data.queue.trackIds.length ? data.queue.trackIds : data.settings.lastQueue
-    queue.value = initialQueue
-    currentIndex.value = normalizeIndex(data.queue.currentIndex, initialQueue.length)
-    currentTrackId.value = data.queue.currentTrackId || data.settings.lastTrackId || initialQueue[currentIndex.value] || null
+    const initialQueue = data.queue.trackIds.length
+      ? data.queue.trackIds
+      : data.settings.lastQueue;
+    queue.value = initialQueue;
+    currentIndex.value = normalizeIndex(
+      data.queue.currentIndex,
+      initialQueue.length,
+    );
+    currentTrackId.value =
+      data.queue.currentTrackId ||
+      data.settings.lastTrackId ||
+      initialQueue[currentIndex.value] ||
+      null;
 
     if (currentTrackId.value && !initialQueue.includes(currentTrackId.value)) {
-      queue.value = [currentTrackId.value, ...initialQueue]
-      currentIndex.value = 0
+      queue.value = [currentTrackId.value, ...initialQueue];
+      currentIndex.value = 0;
     }
 
-    currentTrackUrl.value = ''
-    currentTrackUrlExpiresAt.value = null
-    lastError.value = ''
+    currentTrackUrl.value = "";
+    currentTrackUrlExpiresAt.value = null;
+    lastError.value = "";
   }
 
   async function bootstrap(force = false) {
     if (bootstrapping.value || (libraryLoaded.value && !force)) {
-      return
+      return;
     }
 
-    bootstrapping.value = true
+    bootstrapping.value = true;
     try {
-      const data = await $fetch<LibraryBootstrap>('/api/bootstrap')
-      applyBootstrap(data)
-      libraryLoaded.value = true
+      const data = await $fetch<LibraryBootstrap>("/api/bootstrap");
+      applyBootstrap(data);
+      libraryLoaded.value = true;
     } finally {
-      bootstrapping.value = false
+      bootstrapping.value = false;
     }
   }
 
   function bindAudio(element: HTMLAudioElement | null) {
-    audioElement.value = element
+    audioElement.value = element;
 
     if (!element) {
-      return
+      return;
     }
 
-    element.crossOrigin = 'anonymous'
-    element.volume = settings.value.volume
+    element.crossOrigin = "anonymous";
+    element.volume = settings.value.volume;
 
     if (currentTrackUrl.value && element.src !== currentTrackUrl.value) {
-      element.src = currentTrackUrl.value
+      element.src = currentTrackUrl.value;
+    }
+  }
+
+  function bindCrossfade(engine: CrossfadeEngine) {
+    crossfadeEngine = engine;
+    engine.setVolume(settings.value.volume);
+  }
+
+  function resolveNextTrack(): { trackId: string; index: number } | null {
+    if (!queue.value.length) return null;
+
+    if (settings.value.repeatMode === "one" && currentTrackId.value) {
+      return { trackId: currentTrackId.value, index: currentIndex.value };
+    }
+
+    let targetIndex = currentIndex.value + 1;
+
+    if (settings.value.shuffle && queue.value.length > 1) {
+      const candidateIndexes = queue.value
+        .map((_: string, index: number) => index)
+        .filter((index: number) => index !== currentIndex.value);
+      targetIndex =
+        candidateIndexes[Math.floor(Math.random() * candidateIndexes.length)] ??
+        targetIndex;
+    }
+
+    if (targetIndex >= queue.value.length) {
+      if (settings.value.repeatMode === "all") {
+        targetIndex = 0;
+      } else {
+        return null;
+      }
+    }
+
+    const trackId = queue.value[targetIndex];
+    return trackId ? { trackId, index: targetIndex } : null;
+  }
+
+  async function checkCrossfade(
+    currentTimeSeconds: number,
+    durationSeconds: number,
+  ) {
+    if (!crossfadeEngine || crossfadeTriggered.value) return;
+    if (!durationSeconds || durationSeconds <= 0) return;
+
+    const timeRemaining = durationSeconds - currentTimeSeconds;
+    const CROSSFADE_DURATION = 15;
+
+    if (timeRemaining > CROSSFADE_DURATION || timeRemaining <= 0) return;
+
+    const nextInfo = resolveNextTrack();
+    if (!nextInfo) return;
+
+    crossfadeTriggered.value = true;
+
+    try {
+      const url = await ensureTrackUrl(nextInfo.trackId, true);
+
+      // Update store state to reflect the new track
+      currentTrackId.value = nextInfo.trackId;
+      currentIndex.value = nextInfo.index;
+      persistPlayerState();
+
+      await crossfadeEngine.crossfadeTo(url);
+    } catch {
+      // If crossfade fails, the track will end naturally and handleTrackEnded will fire
+      crossfadeTriggered.value = false;
     }
   }
 
   function setAudioLevel(level: number) {
-    audioLevel.value = level
+    audioLevel.value = level;
   }
 
-  async function swapAudioSource(url: string, options: { autoplay?: boolean, preserveTime?: number } = {}) {
-    const audio = audioElement.value
-    if (!audio) {
-      currentTrackUrl.value = url
-      return
+  async function swapAudioSource(
+    url: string,
+    options: { autoplay?: boolean; preserveTime?: number } = {},
+  ) {
+    currentTrackUrl.value = url;
+
+    // Use crossfade engine if available
+    if (crossfadeEngine) {
+      await crossfadeEngine.play(url, options);
+      const active = crossfadeEngine.activeAudio.value;
+      isPlaying.value = active ? !active.paused : false;
+      return;
     }
 
-    currentTrackUrl.value = url
-    const preserveTime = options.preserveTime ?? 0
+    const audio = audioElement.value;
+    if (!audio) {
+      return;
+    }
+
+    const preserveTime = options.preserveTime ?? 0;
 
     if (audio.src !== url) {
       await new Promise<void>((resolve) => {
         const finalize = () => {
           if (preserveTime > 0) {
-            audio.currentTime = Math.max(0, preserveTime)
+            audio.currentTime = Math.max(0, preserveTime);
           }
 
-          resolve()
-        }
+          resolve();
+        };
 
-        audio.addEventListener('loadedmetadata', finalize, { once: true })
-        audio.crossOrigin = 'anonymous'
-        audio.src = url
-        audio.load()
-      })
+        audio.addEventListener("loadedmetadata", finalize, { once: true });
+        audio.crossOrigin = "anonymous";
+        audio.src = url;
+        audio.load();
+      });
     }
 
     if (options.autoplay !== false) {
-      await audio.play().catch(() => undefined)
-      isPlaying.value = !audio.paused
+      await audio.play().catch(() => undefined);
+      isPlaying.value = !audio.paused;
     }
   }
 
   async function ensureTrackUrl(trackId: string, force = false) {
     const expiresSoon = currentTrackUrlExpiresAt.value
       ? new Date(currentTrackUrlExpiresAt.value).getTime() - Date.now() < 60_000
-      : true
+      : true;
 
-    if (!force && currentTrackId.value === trackId && currentTrackUrl.value && !expiresSoon) {
-      return currentTrackUrl.value
+    if (
+      !force &&
+      currentTrackId.value === trackId &&
+      currentTrackUrl.value &&
+      !expiresSoon
+    ) {
+      return currentTrackUrl.value;
     }
 
-    const playback = await $fetch<PlaybackUrl>(`/api/tracks/${trackId}/play-url`)
-    currentTrackUrlExpiresAt.value = playback.expiresAt
-    currentTrackUrl.value = playback.url
-    return playback.url
+    const playback = await $fetch<PlaybackUrl>(
+      `/api/tracks/${trackId}/play-url`,
+    );
+    currentTrackUrlExpiresAt.value = playback.expiresAt;
+    currentTrackUrl.value = playback.url;
+    return playback.url;
   }
 
   function syncCurrentTrackWithQueue() {
     if (!queue.value.length) {
-      currentTrackId.value = null
-      currentIndex.value = 0
-      return
+      currentTrackId.value = null;
+      currentIndex.value = 0;
+      return;
     }
 
     if (currentTrackId.value && queue.value.includes(currentTrackId.value)) {
-      currentIndex.value = queue.value.indexOf(currentTrackId.value)
-      return
+      currentIndex.value = queue.value.indexOf(currentTrackId.value);
+      return;
     }
 
-    currentIndex.value = normalizeIndex(currentIndex.value, queue.value.length)
-    currentTrackId.value = queue.value[currentIndex.value] || null
+    currentIndex.value = normalizeIndex(currentIndex.value, queue.value.length);
+    currentTrackId.value = queue.value[currentIndex.value] || null;
   }
 
-  async function playTrack(trackId: string, index = queue.value.indexOf(trackId), autoplay = true) {
+  async function playTrack(
+    trackId: string,
+    index = queue.value.indexOf(trackId),
+    autoplay = true,
+  ) {
     if (!trackMap.value.has(trackId)) {
-      return
+      return;
     }
+
+    // Reset crossfade state on manual track selection
+    crossfadeTriggered.value = false;
 
     if (!queue.value.includes(trackId)) {
-      queue.value = [trackId, ...queue.value]
-      index = 0
+      queue.value = [trackId, ...queue.value];
+      index = 0;
     }
 
-    currentTrackId.value = trackId
-    currentIndex.value = normalizeIndex(index, queue.value.length)
-    const url = await ensureTrackUrl(trackId, true)
-    await swapAudioSource(url, { autoplay })
-    persistPlayerState()
+    currentTrackId.value = trackId;
+    currentIndex.value = normalizeIndex(index, queue.value.length);
+    const url = await ensureTrackUrl(trackId, true);
+    await swapAudioSource(url, { autoplay });
+    persistPlayerState();
   }
 
   async function togglePlayback() {
-    const audio = audioElement.value
+    const audio = audioElement.value;
     if (!audio) {
       if (queue.value[0]) {
-        await playTrack(queue.value[0], 0, true)
+        await playTrack(queue.value[0], 0, true);
       }
-      return
+      return;
     }
 
     if (audio.paused) {
       if (!currentTrackId.value && queue.value[0]) {
-        await playTrack(queue.value[0], 0, true)
-        return
+        await playTrack(queue.value[0], 0, true);
+        return;
       }
 
       if (currentTrackId.value && !currentTrackUrl.value) {
-        const url = await ensureTrackUrl(currentTrackId.value, true)
-        await swapAudioSource(url, { autoplay: true })
-        return
+        const url = await ensureTrackUrl(currentTrackId.value, true);
+        await swapAudioSource(url, { autoplay: true });
+        return;
       }
 
-      await audio.play().catch(() => undefined)
-      isPlaying.value = !audio.paused
-      return
+      await audio.play().catch(() => undefined);
+      isPlaying.value = !audio.paused;
+      return;
     }
 
-    audio.pause()
-    isPlaying.value = false
+    audio.pause();
+    isPlaying.value = false;
   }
 
   function pause() {
-    audioElement.value?.pause()
-    isPlaying.value = false
+    audioElement.value?.pause();
+    isPlaying.value = false;
   }
 
   async function next(manual = false) {
     if (!queue.value.length) {
-      return
+      return;
     }
 
-    if (!manual && settings.value.repeatMode === 'one' && currentTrackId.value) {
-      const url = await ensureTrackUrl(currentTrackId.value, true)
-      await swapAudioSource(url, { autoplay: true })
-      return
+    if (
+      !manual &&
+      settings.value.repeatMode === "one" &&
+      currentTrackId.value
+    ) {
+      const url = await ensureTrackUrl(currentTrackId.value, true);
+      await swapAudioSource(url, { autoplay: true });
+      return;
     }
 
-    let targetIndex = currentIndex.value + 1
+    let targetIndex = currentIndex.value + 1;
 
     if (settings.value.shuffle && queue.value.length > 1) {
       const candidateIndexes = queue.value
         .map((_: string, index: number) => index)
-        .filter((index: number) => index !== currentIndex.value)
+        .filter((index: number) => index !== currentIndex.value);
 
-      targetIndex = candidateIndexes[Math.floor(Math.random() * candidateIndexes.length)] ?? targetIndex
+      targetIndex =
+        candidateIndexes[Math.floor(Math.random() * candidateIndexes.length)] ??
+        targetIndex;
     }
 
     if (targetIndex >= queue.value.length) {
-      if (settings.value.repeatMode === 'all') {
-        targetIndex = 0
+      if (settings.value.repeatMode === "all") {
+        targetIndex = 0;
       } else {
-        pause()
-        return
+        pause();
+        return;
       }
     }
 
-    const targetTrackId = queue.value[targetIndex]
+    const targetTrackId = queue.value[targetIndex];
     if (targetTrackId) {
-      await playTrack(targetTrackId, targetIndex, true)
+      await playTrack(targetTrackId, targetIndex, true);
     }
   }
 
   async function previous() {
-    const audio = audioElement.value
+    const audio = audioElement.value;
     if (audio && audio.currentTime > 5) {
-      audio.currentTime = 0
-      return
+      audio.currentTime = 0;
+      return;
     }
 
     if (!queue.value.length) {
-      return
+      return;
     }
 
-    let targetIndex = currentIndex.value - 1
+    let targetIndex = currentIndex.value - 1;
     if (targetIndex < 0) {
-      targetIndex = settings.value.repeatMode === 'all' ? queue.value.length - 1 : 0
+      targetIndex =
+        settings.value.repeatMode === "all" ? queue.value.length - 1 : 0;
     }
 
-    const targetTrackId = queue.value[targetIndex]
+    const targetTrackId = queue.value[targetIndex];
     if (targetTrackId) {
-      await playTrack(targetTrackId, targetIndex, true)
+      await playTrack(targetTrackId, targetIndex, true);
     }
   }
 
   async function handleTrackEnded() {
-    await next(false)
+    // If crossfade already transitioned to the next track, don't advance again
+    if (crossfadeTriggered.value) {
+      crossfadeTriggered.value = false;
+      return;
+    }
+    await next(false);
   }
 
   async function handleAudioError() {
     if (!currentTrackId.value) {
-      return
+      return;
     }
 
-    const audio = audioElement.value
-    const preserveTime = audio?.currentTime ?? 0
-    const url = await ensureTrackUrl(currentTrackId.value, true)
-    await swapAudioSource(url, { autoplay: true, preserveTime })
+    const audio = audioElement.value;
+    const preserveTime = audio?.currentTime ?? 0;
+    const url = await ensureTrackUrl(currentTrackId.value, true);
+    await swapAudioSource(url, { autoplay: true, preserveTime });
   }
 
   function setQueue(trackIds: string[], startIndex = 0, autoplay = false) {
-    queue.value = trackIds.filter(trackId => trackMap.value.has(trackId))
-    currentIndex.value = normalizeIndex(startIndex, queue.value.length)
-    currentTrackId.value = queue.value[currentIndex.value] || null
-    persistPlayerState()
+    queue.value = trackIds.filter((trackId) => trackMap.value.has(trackId));
+    currentIndex.value = normalizeIndex(startIndex, queue.value.length);
+    currentTrackId.value = queue.value[currentIndex.value] || null;
+    persistPlayerState();
 
     if (autoplay && currentTrackId.value) {
-      return playTrack(currentTrackId.value, currentIndex.value, true)
+      return playTrack(currentTrackId.value, currentIndex.value, true);
     }
 
-    return Promise.resolve()
+    return Promise.resolve();
   }
 
   function enqueue(trackId: string) {
     if (!trackMap.value.has(trackId)) {
-      return
+      return;
     }
 
-    queue.value = [...queue.value, trackId]
-    syncCurrentTrackWithQueue()
-    persistPlayerState()
+    queue.value = [...queue.value, trackId];
+    syncCurrentTrackWithQueue();
+    persistPlayerState();
   }
 
   function removeFromQueue(trackId: string) {
-    queue.value = queue.value.filter((id: string) => id !== trackId)
-    syncCurrentTrackWithQueue()
-    persistPlayerState()
+    queue.value = queue.value.filter((id: string) => id !== trackId);
+    syncCurrentTrackWithQueue();
+    persistPlayerState();
   }
 
   function setSearchQuery(value: string) {
-    searchQuery.value = value
+    searchQuery.value = value;
   }
 
   function setVolume(value: number) {
-    settings.value.volume = value
-    if (audioElement.value) {
-      audioElement.value.volume = value
+    settings.value.volume = value;
+    if (crossfadeEngine) {
+      crossfadeEngine.setVolume(value);
+    } else if (audioElement.value) {
+      audioElement.value.volume = value;
     }
 
-    persistPlayerState()
+    persistPlayerState();
   }
 
   function cycleRepeatMode() {
-    const order: RepeatMode[] = ['off', 'all', 'one']
-    const nextMode = order[(order.indexOf(settings.value.repeatMode) + 1) % order.length] || 'off'
-    settings.value.repeatMode = nextMode
-    persistPlayerState()
+    const order: RepeatMode[] = ["off", "all", "one"];
+    const nextMode =
+      order[(order.indexOf(settings.value.repeatMode) + 1) % order.length] ||
+      "off";
+    settings.value.repeatMode = nextMode;
+    persistPlayerState();
   }
 
   function toggleShuffle() {
-    settings.value.shuffle = !settings.value.shuffle
-    persistPlayerState()
+    settings.value.shuffle = !settings.value.shuffle;
+    persistPlayerState();
   }
 
   async function setActiveScene(sceneId: string) {
-    const target = backgrounds.value.find((scene: BackgroundScene) => scene.id === sceneId)
+    const target = backgrounds.value.find(
+      (scene: BackgroundScene) => scene.id === sceneId,
+    );
     if (!target) {
-      return
+      return;
     }
 
-    settings.value.activeSceneId = sceneId
-    await $fetch('/api/settings/background', {
-      method: 'PATCH',
+    settings.value.activeSceneId = sceneId;
+    await $fetch("/api/settings/background", {
+      method: "PATCH",
       body: {
-        activeSceneId: sceneId
-      }
-    })
+        activeSceneId: sceneId,
+      },
+    });
 
-    if (target.kind === 'video' && !target.playbackUrl) {
-      await refreshBackgroundPlayback(sceneId)
+    if (target.kind === "video" && !target.playbackUrl) {
+      await refreshBackgroundPlayback(sceneId);
     }
   }
 
   async function refreshBackgroundPlayback(sceneId: string) {
-    const target = backgrounds.value.find((scene: BackgroundScene) => scene.id === sceneId)
+    const target = backgrounds.value.find(
+      (scene: BackgroundScene) => scene.id === sceneId,
+    );
     if (!target) {
-      return null
+      return null;
     }
 
-    const playback = await $fetch<PlaybackUrl>(`/api/backgrounds/${sceneId}/video-url`)
-    target.playbackUrl = playback.url
-    return playback.url
+    const playback = await $fetch<PlaybackUrl>(
+      `/api/backgrounds/${sceneId}/video-url`,
+    );
+    target.playbackUrl = playback.url;
+    return playback.url;
   }
 
   async function parseTrackMetadata(file: File) {
-    const metadata = await parseBlob(file).catch(() => null)
-    const title = metadata?.common.title || file.name.replace(/\.[^.]+$/, '')
-    const artist = metadata?.common.artist || 'Unknown Artist'
-    const album = metadata?.common.album || null
-    const genre = metadata?.common.genre?.[0] || null
-    const durationMs = Math.round((metadata?.format.duration || 0) * 1000)
+    const metadata = await parseBlob(file).catch(() => null);
+    const title = metadata?.common.title || file.name.replace(/\.[^.]+$/, "");
+    const artist = metadata?.common.artist || "Unknown Artist";
+    const album = metadata?.common.album || null;
+    const genre = metadata?.common.genre?.[0] || null;
+    const durationMs = Math.round((metadata?.format.duration || 0) * 1000);
 
     return {
       title,
       artist,
       album,
       genre,
-      durationMs
-    }
+      durationMs,
+    };
   }
 
   async function uploadFiles(fileList: FileList | File[]) {
-    const files = Array.from(fileList)
+    const files = Array.from(fileList);
     if (!files.length) {
-      return
+      return;
     }
 
     for (const file of files) {
       const status: UploadStatus = {
         filename: file.name,
-        status: 'queued'
-      }
+        status: "queued",
+      };
 
-      uploadStatuses.value = [status, ...uploadStatuses.value].slice(0, 6)
+      uploadStatuses.value = [status, ...uploadStatuses.value].slice(0, 6);
 
       try {
-        const metadata = await parseTrackMetadata(file)
-        status.status = 'uploading'
+        const metadata = await parseTrackMetadata(file);
+        status.status = "uploading";
 
-        const ticket = await $fetch<UploadTicket>('/api/uploads/audio-url', {
-          method: 'POST',
+        const ticket = await $fetch<UploadTicket>("/api/uploads/audio-url", {
+          method: "POST",
           body: {
             filename: file.name,
             mimeType: file.type,
-            size: file.size
-          }
-        })
+            size: file.size,
+          },
+        });
 
         const uploadResponse = await fetch(ticket.uploadUrl, {
           method: ticket.method,
           headers: ticket.headers,
-          body: file
-        })
+          body: file,
+        });
 
         if (!uploadResponse.ok) {
-          throw new Error(`Upload failed for ${file.name}`)
+          throw new Error(`Upload failed for ${file.name}`);
         }
 
-        status.status = 'finishing'
-        await $fetch('/api/uploads/complete', {
-          method: 'POST',
+        status.status = "finishing";
+        await $fetch("/api/uploads/complete", {
+          method: "POST",
           body: {
             uploadId: ticket.uploadId,
-            metadata
-          }
-        })
+            metadata,
+          },
+        });
 
-        const track = await $fetch<Track>('/api/tracks', {
-          method: 'POST',
+        const track = await $fetch<Track>("/api/tracks", {
+          method: "POST",
           body: {
             uploadId: ticket.uploadId,
             title: metadata.title,
             artist: metadata.artist,
             album: metadata.album,
             durationMs: metadata.durationMs,
-            genre: metadata.genre
-          }
-        })
+            genre: metadata.genre,
+          },
+        });
 
-        tracks.value = [track, ...tracks.value]
-        status.status = 'done'
-        status.message = 'Imported'
+        tracks.value = [track, ...tracks.value];
+        status.status = "done";
+        status.message = "Imported";
 
         if (!queue.value.length) {
-          await setQueue([track.id], 0, false)
+          await setQueue([track.id], 0, false);
         }
       } catch (caught) {
-        status.status = 'error'
-        status.message = caught instanceof Error ? caught.message : 'Upload failed'
-        lastError.value = status.message
+        status.status = "error";
+        status.message =
+          caught instanceof Error ? caught.message : "Upload failed";
+        lastError.value = status.message;
       }
     }
   }
 
   async function createPlaylist(name: string) {
-    const trimmedName = name.trim()
+    const trimmedName = name.trim();
     if (!trimmedName || !queue.value.length) {
-      return null
+      return null;
     }
 
-    const playlist = await $fetch<Playlist>('/api/playlists', {
-      method: 'POST',
+    const playlist = await $fetch<Playlist>("/api/playlists", {
+      method: "POST",
       body: {
         name: trimmedName,
-        trackIds: queue.value
-      }
-    })
+        trackIds: queue.value,
+      },
+    });
 
-    playlists.value = [...playlists.value, playlist].sort((left, right) => left.name.localeCompare(right.name))
-    return playlist
+    playlists.value = [...playlists.value, playlist].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    return playlist;
   }
 
   async function loadPlaylist(playlistId: string) {
-    const playlist = playlists.value.find((item: Playlist) => item.id === playlistId)
+    const playlist = playlists.value.find(
+      (item: Playlist) => item.id === playlistId,
+    );
     if (!playlist) {
-      return
+      return;
     }
 
-    await setQueue(playlist.trackIds, 0, true)
+    await setQueue(playlist.trackIds, 0, true);
   }
 
   async function deleteTrack(trackId: string) {
     if (!trackMap.value.has(trackId)) {
-      return
+      return;
     }
 
     try {
       await $fetch(`/api/tracks/${trackId}`, {
-        method: 'DELETE'
-      })
+        method: "DELETE",
+      });
 
-      tracks.value = tracks.value.filter((track: Track) => track.id !== trackId)
+      tracks.value = tracks.value.filter(
+        (track: Track) => track.id !== trackId,
+      );
 
       if (queue.value.includes(trackId)) {
-        const wasCurrentTrack = currentTrackId.value === trackId
-        queue.value = queue.value.filter((id: string) => id !== trackId)
-        
+        const wasCurrentTrack = currentTrackId.value === trackId;
+        queue.value = queue.value.filter((id: string) => id !== trackId);
+
         if (wasCurrentTrack) {
-          const audio = audioElement.value
+          const audio = audioElement.value;
           if (audio) {
-            audio.pause()
-            audio.removeAttribute('src')
-            audio.load()
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
           }
-          currentTrackUrl.value = ''
-          currentTrackUrlExpiresAt.value = null
-          isPlaying.value = false
-          
-          syncCurrentTrackWithQueue()
-          
+          currentTrackUrl.value = "";
+          currentTrackUrlExpiresAt.value = null;
+          isPlaying.value = false;
+
+          syncCurrentTrackWithQueue();
+
           if (currentTrackId.value && queue.value.length > 0) {
-            await playTrack(currentTrackId.value, currentIndex.value, true)
+            await playTrack(currentTrackId.value, currentIndex.value, true);
           }
         } else {
-          syncCurrentTrackWithQueue()
+          syncCurrentTrackWithQueue();
         }
-        
-        persistPlayerState()
+
+        persistPlayerState();
       }
     } catch (error) {
-      lastError.value = error instanceof Error ? error.message : 'Failed to delete track'
-      throw error
+      lastError.value =
+        error instanceof Error ? error.message : "Failed to delete track";
+      throw error;
     }
   }
 
@@ -657,10 +813,13 @@ export const useVibeStore = defineStore('vibe', () => {
     lastError,
     bootstrapping,
     libraryLoaded,
+    crossfadeTriggered,
     bootstrap,
     reset,
     bindAudio,
+    bindCrossfade,
     setAudioLevel,
+    checkCrossfade,
     togglePlayback,
     pause,
     playTrack,
@@ -680,6 +839,6 @@ export const useVibeStore = defineStore('vibe', () => {
     uploadFiles,
     createPlaylist,
     loadPlaylist,
-    deleteTrack
-  }
-})
+    deleteTrack,
+  };
+});

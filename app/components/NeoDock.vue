@@ -19,11 +19,13 @@ import type { BackgroundScene } from '~~/shared/types/vibe'
 
 const vibe = useVibeStore()
 const ui = useWorkspaceUI()
-const audioRef = ref<HTMLAudioElement | null>(null)
+const audioRefA = ref<HTMLAudioElement | null>(null)
+const audioRefB = ref<HTMLAudioElement | null>(null)
 const currentTime = ref(0)
 const duration = ref(0)
 
-useAudioVisualiser(audioRef, vibe.setAudioLevel)
+const crossfade = useCrossfade()
+useAudioVisualiser(crossfade.activeAudio, vibe.setAudioLevel, crossfade)
 
 const scenePills = computed<{ prev: BackgroundScene | null; current: BackgroundScene | null; next: BackgroundScene | null }>(() => {
   const scenes = vibe.backgrounds
@@ -101,25 +103,29 @@ function formatTime(totalSeconds: number) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 
-function syncAudioElement(audio: HTMLAudioElement | null) {
-  vibe.bindAudio(audio)
-}
-
 function onLoadedMetadata(event: Event) {
   const audio = event.target as HTMLAudioElement
+  if (audio !== crossfade.activeAudio.value) return
   duration.value = audio.duration || 0
 }
 
 function onTimeUpdate(event: Event) {
   const audio = event.target as HTMLAudioElement
+  // Always check crossfade on the outgoing track's timeupdate
+  if (!crossfade.isCrossfading.value) {
+    vibe.checkCrossfade(audio.currentTime, audio.duration)
+  }
+  // Only update UI from the active deck
+  if (audio !== crossfade.activeAudio.value) return
   currentTime.value = audio.currentTime
   duration.value = audio.duration || duration.value
 }
 
 function onSeek(event: Event) {
   const value = Number((event.target as HTMLInputElement).value)
-  if (!audioRef.value || !Number.isFinite(value)) return
-  audioRef.value.currentTime = value
+  const active = crossfade.activeAudio.value
+  if (!active || !Number.isFinite(value)) return
+  active.currentTime = value
   currentTime.value = value
 }
 
@@ -128,21 +134,34 @@ function activateScene(scene: BackgroundScene) {
 }
 
 onMounted(() => {
-  syncAudioElement(audioRef.value)
+  if (audioRefA.value && audioRefB.value) {
+    crossfade.bind(audioRefA.value, audioRefB.value)
+    vibe.bindCrossfade(crossfade)
+    vibe.bindAudio(audioRefA.value)
+  }
   window.addEventListener('keydown', ui.handleEscape)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', ui.handleEscape)
+  crossfade.destroy()
 })
-
-watch(audioRef, syncAudioElement)
 </script>
 
 <template>
   <div class="neo-dock">
     <audio
-      ref="audioRef"
+      ref="audioRefA"
+      preload="metadata"
+      @play="vibe.isPlaying = true"
+      @pause="vibe.isPlaying = false"
+      @ended="vibe.handleTrackEnded"
+      @error="vibe.handleAudioError"
+      @loadedmetadata="onLoadedMetadata"
+      @timeupdate="onTimeUpdate"
+    />
+    <audio
+      ref="audioRefB"
       preload="metadata"
       @play="vibe.isPlaying = true"
       @pause="vibe.isPlaying = false"
