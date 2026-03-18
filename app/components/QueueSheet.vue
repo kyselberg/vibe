@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Track } from '~~/shared/types/vibe'
+import {X} from "lucide-vue-next"
 
 const vibe = useVibeStore()
 const ui = useWorkspaceUI()
@@ -21,7 +22,7 @@ function formatDuration(durationMs: number) {
     <div class="sheet-header">
       <h2 class="sheet-title">Queue</h2>
       <span class="sheet-count">{{ queueTracks.length }} tracks</span>
-      <button class="sheet-close" type="button" @click="ui.closeSheet()">Close</button>
+      <button class="sheet-close" type="button" @click="ui.closeSheet()"><X /></button>
     </div>
 
     <div class="sheet-body">

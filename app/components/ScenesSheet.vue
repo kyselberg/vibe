@@ -2,6 +2,7 @@
 import type { ComponentPublicInstance } from 'vue'
 import type { BackgroundScene } from '~~/shared/types/vibe'
 import { getBackgroundCategoryMeta, groupBackgroundScenes } from '~~/shared/backgrounds/registry'
+import {X} from "lucide-vue-next"
 
 const vibe = useVibeStore()
 const ui = useWorkspaceUI()
@@ -67,7 +68,7 @@ watch(() => vibe.activeScene?.id, (_, previousSceneId) => {
     <div class="sheet-header">
       <h2 class="sheet-title">Scenes</h2>
       <span class="sheet-count">{{ vibe.backgrounds.length }} scenes</span>
-      <button class="sheet-close" type="button" @click="ui.closeSheet()">Close</button>
+      <button class="sheet-close" type="button" @click="ui.closeSheet()"><X /></button>
     </div>
 
     <div class="sheet-body scenes-sheet__body">

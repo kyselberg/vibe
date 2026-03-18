@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ListPlus, Trash2, Music, X } from 'lucide-vue-next'
 import type { Track } from '~~/shared/types/vibe'
 
 const vibe = useVibeStore()
@@ -52,7 +53,7 @@ async function confirmDeleteTrack(track: Track) {
   <div class="sheet library-sheet">
     <div class="sheet-header">
       <h2 class="sheet-title">Library</h2>
-      <button class="sheet-close" type="button" @click="ui.closeSheet()">Close</button>
+      <button class="sheet-close" type="button" @click="ui.closeSheet()"><X /></button>
     </div>
 
     <div class="sheet-tabs">
@@ -102,17 +103,32 @@ async function confirmDeleteTrack(track: Track) {
             class="sheet-track"
             :class="{ 'is-active': vibe.currentTrackId === track.id }"
           >
+            <span class="sheet-track-cover">
+              <Music :size="16" />
+            </span>
             <button class="sheet-track-body" type="button" @click="playTrack(track)">
               <span class="sheet-track-title">{{ track.title }}</span>
               <span class="sheet-track-meta">{{ track.artist }}</span>
             </button>
             <span class="sheet-track-duration">{{ formatDuration(track.durationMs) }}</span>
-            <button class="sheet-action" type="button" @click="vibe.enqueue(track.id)">
-              {{ queueTrackIds.has(track.id) ? 'Queued' : 'Add' }}
-            </button>
-            <button class="sheet-action" type="button" @click="confirmDeleteTrack(track)">
-              Delete
-            </button>
+            <span class="sheet-track-actions">
+              <button
+                class="sheet-track-action"
+                type="button"
+                :title="queueTrackIds.has(track.id) ? 'In queue' : 'Add to queue'"
+                @click="vibe.enqueue(track.id)"
+              >
+                <ListPlus :size="14" />
+              </button>
+              <button
+                class="sheet-track-action sheet-track-action--danger"
+                type="button"
+                title="Delete track"
+                @click="confirmDeleteTrack(track)"
+              >
+                <Trash2 :size="14" />
+              </button>
+            </span>
           </li>
         </ul>
 

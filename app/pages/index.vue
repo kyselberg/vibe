@@ -37,13 +37,13 @@ watch(() => auth.authenticated, async (authenticated) => {
       <template v-else>
         <Transition name="sheet-fade">
           <div
-            v-if="ui.openSurface.value !== 'none'"
+            v-if="ui.openSurface.value === 'queue' || ui.openSurface.value === 'scenes'"
             class="sheet-backdrop"
             @click="ui.handleBackdropClick"
           />
         </Transition>
 
-        <Transition name="sheet-slide">
+        <Transition name="panel-slide">
           <LibrarySheet v-if="ui.openSurface.value === 'library'" />
         </Transition>
 
