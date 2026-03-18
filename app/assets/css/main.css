@@ -803,13 +803,50 @@ button {
   justify-content: flex-end;
 }
 
+.dock-now-playing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 8px 4px 4px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  transition: background 120ms ease;
+}
+
+.dock-now-playing:hover {
+  background: var(--surface-strong);
+}
+
+.dock-now-playing:hover .dock-track-title {
+  text-decoration: underline;
+}
+
+.dock-now-playing:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.4);
+}
+
 .dock-cover-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 48px;
   height: 48px;
   flex: 0 0 48px;
   border-radius: 6px;
   background: var(--surface);
   border: 1px solid var(--panel-border);
+  color: var(--text-muted);
+}
+
+.dock-cover-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .dock-track-info {
@@ -829,35 +866,12 @@ button {
   text-overflow: ellipsis;
 }
 
-.dock-track-title:hover {
-  text-decoration: underline;
-  cursor: pointer;
-}
-
 .dock-track-artist {
   font-size: 0.76rem;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.dock-heart-btn {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-}
-
-.dock-heart-btn:hover {
-  color: var(--accent);
-  background: transparent;
-  transform: none;
-}
-
-.dock-heart-btn .dock-icon {
-  width: 16px;
-  height: 16px;
 }
 
 .dock-right-controls {
@@ -871,6 +885,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
+  border: 1px solid var(--panel-border);
   border-radius: 999px;
   background: var(--surface);
   font-size: 0.72rem;
@@ -879,6 +894,18 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.dock-scene-chip:hover {
+  background: var(--surface-strong);
+  color: var(--text-main);
+}
+
+.dock-scene-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.4);
 }
 
 .dock-scene-chip-name {

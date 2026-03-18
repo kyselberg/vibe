@@ -31,6 +31,15 @@ export function useWorkspaceUI() {
     closeSheet()
   }
 
+  function openLibraryToTrack() {
+    if (openSurface.value === 'library' && libraryTab.value === 'tracks') {
+      openSurface.value = 'none'
+      return
+    }
+    libraryTab.value = 'tracks'
+    openSurface.value = 'library'
+  }
+
   return {
     openSurface: readonly(openSurface),
     libraryTab: readonly(libraryTab),
@@ -39,6 +48,7 @@ export function useWorkspaceUI() {
     toggleSheet,
     setLibraryTab,
     handleEscape,
-    handleBackdropClick
+    handleBackdropClick,
+    openLibraryToTrack
   }
 }

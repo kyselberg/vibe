@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import {
-  Heart,
   LibraryBig,
   ListMusic,
+  Music,
   Pause,
   Play,
   Repeat,
@@ -129,10 +129,6 @@ function onSeek(event: Event) {
   currentTime.value = value
 }
 
-function activateScene(scene: BackgroundScene) {
-  vibe.setActiveScene(scene.id)
-}
-
 onMounted(() => {
   if (audioRefA.value && audioRefB.value) {
     crossfade.bind(audioRefA.value, audioRefB.value)
@@ -172,18 +168,20 @@ onUnmounted(() => {
     />
 
     <div class="dock-zone dock-zone--left">
-      <div class="dock-cover-art" />
-      <div class="dock-track-info">
-        <span class="dock-track-title">{{ vibe.currentTrack?.title || 'No track' }}</span>
-        <span class="dock-track-artist">{{ vibe.currentTrack?.artist || 'Queue something' }}</span>
-      </div>
       <button
-        class="dock-icon-button dock-heart-btn"
+        class="dock-now-playing"
         type="button"
-        aria-label="Like track"
-        title="Like track"
+        aria-label="Show current track in library"
+        title="Show in library"
+        @click="ui.openLibraryToTrack()"
       >
-        <Heart class="dock-icon" aria-hidden="true" />
+        <span class="dock-cover-art">
+          <Music class="dock-cover-icon" aria-hidden="true" />
+        </span>
+        <span class="dock-track-info">
+          <span class="dock-track-title">{{ vibe.currentTrack?.title || 'No track' }}</span>
+          <span class="dock-track-artist">{{ vibe.currentTrack?.artist || 'Queue something' }}</span>
+        </span>
       </button>
     </div>
 
@@ -281,9 +279,16 @@ onUnmounted(() => {
         >
           <ListMusic class="dock-icon" aria-hidden="true" />
         </button>
-        <div v-if="scenePills.current" class="dock-scene-chip">
+        <button
+          v-if="scenePills.current"
+          class="dock-scene-chip"
+          type="button"
+          aria-label="Open scenes"
+          :title="scenePills.current.name"
+          @click="ui.toggleSheet('scenes')"
+        >
           <span class="dock-scene-chip-name">{{ scenePills.current.name }}</span>
-        </div>
+        </button>
         <button
           class="dock-icon-button"
           type="button"
